@@ -22,8 +22,13 @@ from aiobmsble.basebms import BaseBMS
 # Nowe ANT (nowy protokol) maja nazwy typu ANT-BLE16ZMUB / ANT-BLE24BHUB i tu NIE pasuja.
 NAME_PATTERNS: Final[tuple[str, ...]] = ("ANT?BLE??A",)
 
-# Jesli prad wychodzi z odwrotnym znakiem (ladowanie ujemne), zmien na -1.
-CURRENT_SIGN: Final[int] = 1
+# Znak pradu: stary ANT podaje ladowanie jako ujemne, HA oczekuje ladowania dodatniego.
+CURRENT_SIGN: Final[int] = -1
+
+# Ile czujnikow temperatury jest faktycznie podpietych (1 do 6).
+# None = automatycznie: pomija czujniki, ktore pokazuja dokladnie 0 stopni
+# (niepodpiete), ale jesli wszystkie pokazuja 0, zostawia je.
+TEMP_SENSORS_USED: Final[int | None] = None
 
 _SERVICE: Final[str] = normalize_uuid_str("ffe0")
 _HEAD: Final[bytes] = b"\xaa\x55\xaa"
@@ -140,6 +145,15 @@ class BMS(BaseBMS):
         dsg: int = d[104]
         bal: int = d[105]
 
+        temps: list[Any] = self._temp_values(
+            d, start=91, values=_TEMP_SENSORS, byteorder="big", signed=True
+        )
+        if TEMP_SENSORS_USED is not None:
+            temps = temps[: max(1, min(TEMP_SENSORS_USED, _TEMP_SENSORS))]
+        else:
+            connected = [t for t in temps if float(getattr(t, "value", t)) != 0]
+            temps = connected or temps
+
         result: BMSSample = {
             "voltage": u16(4) / 10,
             "current": CURRENT_SIGN * s32(70) / 10,
@@ -151,10 +165,8 @@ class BMS(BaseBMS):
             "cell_voltages": self._cell_voltages(
                 d, cells=cells, start=6, byteorder="big"
             ),
-            "temp_sensors": _TEMP_SENSORS,
-            "temp_values": self._temp_values(
-                d, start=91, values=_TEMP_SENSORS, byteorder="big", signed=True
-            ),
+            "temp_sensors": len(temps),
+            "temp_values": temps,
             "chrg_mosfet": chg == 0x01,
             "dischrg_mosfet": dsg == 0x01,
             "balancer": bal != 0x00,
