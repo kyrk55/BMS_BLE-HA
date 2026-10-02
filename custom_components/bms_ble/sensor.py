@@ -257,6 +257,21 @@ SENSOR_TYPES: Final[list[BmsEntityDescription]] = [
 ]
 
 
+def _cell_descr(idx: int) -> BmsEntityDescription:
+    """Return description of a single cell voltage sensor (1-based index)."""
+    return BmsEntityDescription(
+        device_class=SensorDeviceClass.VOLTAGE,
+        key=f"cell_voltage_{idx}",
+        name=f"Cell {idx}",
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=3,
+        value_fn=lambda data, i=idx - 1: (
+            cells[i] if i < len(cells := data.get("cell_voltages", [])) else None
+        ),
+    )
+
+
 async def async_setup_entry(
     _hass: HomeAssistant,
     config_entry: BTBmsConfigEntry,
@@ -277,6 +292,14 @@ async def async_setup_entry(
         if descr.optional and descr.key not in bms.data:
             continue
         entities.append(BMSSensor(bms, descr, mac))
+
+    # osobny sensor dla kazdej celi, liczba cel brana z pierwszego odczytu BMS
+    cell_count: Final[int] = (
+        len(bms.data.get("cell_voltages", [])) if bms.data else 0
+    )
+    entities.extend(
+        BMSSensor(bms, _cell_descr(idx), mac) for idx in range(1, cell_count + 1)
+    )
 
     async_add_entities(entities)
 
