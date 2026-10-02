@@ -16,10 +16,10 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.importlib import async_import_module
 
+from . import extra_patterns  # noqa: F401  (musi byc przed .config_flow)
 from .config_flow import ConfigFlow
 from .const import CONF_ADVANCED_OPTIONS, CONF_KEEP_ALIVE, DOMAIN, LOGGER
 from .coordinator import BTBmsCoordinator
-from . import extra_patterns  # noqa: F401
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
