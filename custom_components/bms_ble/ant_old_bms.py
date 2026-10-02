@@ -10,6 +10,7 @@ Protokol wg syssi/esphome-ant-bms (komponent ant_bms_old_ble):
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Final
 
 from bleak.backends.characteristic import BleakGATTCharacteristic
@@ -26,8 +27,8 @@ NAME_PATTERNS: Final[tuple[str, ...]] = ("ANT?BLE??A",)
 CURRENT_SIGN: Final[int] = -1
 
 # Ile czujnikow temperatury jest faktycznie podpietych (1 do 6).
-# None = automatycznie: pomija czujniki, ktore pokazuja dokladnie 0 stopni
-# (niepodpiete), ale jesli wszystkie pokazuja 0, zostawia je.
+# None = automatycznie: pomija czujniki niepodpiete, czyli pokazujace dokladnie 0
+# albo -40 stopni lub mniej (rozwarty NTC). Jesli wszystkie sa takie, zostawia je.
 TEMP_SENSORS_USED: Final[int | None] = None
 
 _SERVICE: Final[str] = normalize_uuid_str("ffe0")
@@ -35,7 +36,11 @@ _HEAD: Final[bytes] = b"\xaa\x55\xaa"
 _FRAME_LEN: Final[int] = 140
 _CMD_STATUS: Final[bytes] = bytes([0xDB, 0xDB, 0x00, 0x00, 0x00, 0x00])
 _MAX_CELLS: Final[int] = 32
+# pauza po wlaczeniu notyfikacji, zanim wyslemy pierwsze zadanie (stary ANT potrzebuje chwili)
+_SETTLE_TIME: Final[float] = 0.5
 _TEMP_SENSORS: Final[int] = 6
+# odczyt na poziomie tej wartosci lub nizej oznacza niepodpiety czujnik
+_TEMP_DISCONNECTED: Final[float] = -40
 
 # kody stanu MOSFET, ktore nie oznaczaja problemu
 _CHG_OK: Final[frozenset[int]] = frozenset({0x00, 0x01, 0x04, 0x0F})
@@ -79,6 +84,22 @@ class BMS(BaseBMS):
     def uuid_tx() -> str:
         """Charakterystyka zapisu."""
         return "ffe1"
+
+    async def device_info(self) -> BMSInfo:  # type: ignore[misc]
+        """Jak w BaseBMS, ale bez rozlaczania po odczycie.
+
+        Stary ANT zle znosi szybkie rozlaczenie i ponowne polaczenie (zrywa lacze),
+        wiec polaczenie z odczytu info zostaje i od razu sluzy do odczytu danych.
+        """
+        await self._connect()
+        return await self._fetch_device_info()
+
+    async def _init_connection(
+        self, char_notify: BleakGATTCharacteristic | int | str | None = None
+    ) -> None:
+        """Wlacz notyfikacje i daj BMS chwile przed pierwszym zadaniem."""
+        await super()._init_connection(char_notify)
+        await asyncio.sleep(_SETTLE_TIME)
 
     async def _fetch_device_info(self) -> BMSInfo:
         """Stary ANT nie ma serwisu informacji o urzadzeniu."""
@@ -151,7 +172,12 @@ class BMS(BaseBMS):
         if TEMP_SENSORS_USED is not None:
             temps = temps[: max(1, min(TEMP_SENSORS_USED, _TEMP_SENSORS))]
         else:
-            connected = [t for t in temps if float(getattr(t, "value", t)) != 0]
+            connected = [
+                t
+                for t in temps
+                if (val := float(getattr(t, "value", t))) != 0
+                and val > _TEMP_DISCONNECTED
+            ]
             temps = connected or temps
 
         result: BMSSample = {
