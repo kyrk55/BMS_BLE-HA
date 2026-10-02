@@ -19,6 +19,7 @@ from homeassistant.helpers.importlib import async_import_module
 from .config_flow import ConfigFlow
 from .const import CONF_ADVANCED_OPTIONS, CONF_KEEP_ALIVE, DOMAIN, LOGGER
 from .coordinator import BTBmsCoordinator
+from . import extra_patterns  # noqa: F401
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
